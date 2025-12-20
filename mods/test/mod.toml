@@ -1,0 +1,7 @@
+id = "test"
+name = "Test"
+description = "Testing mod"
+version = "0.1.0"
+
+[dependencies]
+base = "0.1.0"

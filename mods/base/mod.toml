@@ -1,0 +1,6 @@
+id = "base"
+name = "Base"
+description = "The base mod for Modulus"
+version = "0.1.0"
+
+[dependencies]
