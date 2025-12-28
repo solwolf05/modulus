@@ -6,11 +6,8 @@ use bevy::{
 
 use crate::{
     camera::CameraPlugin,
-    input::{InputPlugin, InputType},
-    modding::{
-        ModLoad, ModPlugin,
-        registry::{IdInterner, Registry},
-    },
+    input::{Input, InputMapping, InputPlugin, InputState},
+    modding::{ModLoad, ModPlugin, registry::Registry},
 };
 
 mod camera;
@@ -35,48 +32,71 @@ fn main() -> AppExit {
                 })
                 .set(ImagePlugin::default_nearest()),
             PhysicsPlugins::default().with_length_unit(UNIT as f32),
+            PhysicsPickingPlugin,
             #[cfg(debug_assertions)]
             PhysicsDebugPlugin,
             ModPlugin,
-            CameraPlugin,
             InputPlugin,
+            CameraPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, esc_exit)
+        .add_systems(Update, (esc_exit, cursor_system))
         // Temporary mod loading
         .add_systems(ModLoad, reg_setup)
-        .init_resource::<Registry<InputType>>()
         .run()
 }
 
-fn reg_setup(mut registry: ResMut<Registry<InputType>>, interner: ResMut<IdInterner>) {
-    let interner = interner.into_inner();
-    registry.register(
-        interner,
-        "base::input::y",
-        InputType::KeyAxis(KeyCode::KeyW, KeyCode::KeyS),
-    );
-    registry.register(
-        interner,
-        "base::input::x",
-        InputType::KeyAxis(KeyCode::KeyD, KeyCode::KeyA),
-    );
-    registry.register(
-        interner,
-        "base::input::speed",
-        InputType::KeyPressed(KeyCode::ShiftLeft),
-    );
-    registry.register(interner, "base::input::zoom", InputType::Scroll);
-    registry.register(interner, "base::input::mouse_x", InputType::MouseX);
-    registry.register(interner, "base::input::mouse_y", InputType::MouseY);
-    registry.register(
-        interner,
-        "base::input::pan",
-        InputType::MousePressed(MouseButton::Middle),
-    );
+fn reg_setup(mut input: ResMut<Registry<InputMapping>>) {
+    input
+        .register("base::input::up", Input::key(KeyCode::KeyW).into())
+        .unwrap();
+    input
+        .register("base::input::down", Input::key(KeyCode::KeyS).into())
+        .unwrap();
+    input
+        .register("base::input::left", Input::key(KeyCode::KeyA).into())
+        .unwrap();
+    input
+        .register("base::input::right", Input::key(KeyCode::KeyD).into())
+        .unwrap();
+
+    input
+        .register("base::input::speed", Input::key(KeyCode::ShiftLeft).into())
+        .unwrap();
+
+    input
+        .register(
+            "base::input::zoom_in",
+            Input::key(KeyCode::Equal).with_lshift().into(),
+        )
+        .unwrap();
+    input
+        .register(
+            "base::input::zoom_out",
+            Input::key(KeyCode::Minus).with_lshift().into(),
+        )
+        .unwrap();
+
+    input
+        .register("base::input::pan", Input::mouse(MouseButton::Middle).into())
+        .unwrap();
+
+    input
+        .register(
+            "base::input::select",
+            Input::mouse(MouseButton::Left).into(),
+        )
+        .unwrap();
 }
 
 fn setup(mut commands: Commands) {
+    commands.spawn((
+        Cursor,
+        Sprite::from_color(Color::hsl(0.0, 0.0, 1.0), Vec2::ONE),
+        RigidBody::Kinematic,
+        Collider::rectangle(1.0, 1.0),
+    ));
+
     // Red physics box
     commands.spawn((
         Transform::from_xyz(0.0, 0.0, 0.0),
@@ -97,5 +117,26 @@ fn setup(mut commands: Commands) {
 fn esc_exit(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
     if input.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
+    }
+}
+
+#[derive(Debug, Component)]
+#[require(Transform)]
+struct Cursor;
+
+fn cursor_system(
+    mut cursor: Query<&mut Transform, With<Cursor>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
+    input: Res<InputState>,
+) {
+    let Some(mouse) = input.mouse() else {
+        return;
+    };
+
+    let camera = camera.single().unwrap();
+    let camera_transform = camera.1;
+    let camera = camera.0;
+    if let Ok(world_pos) = camera.viewport_to_world_2d(camera_transform, mouse) {
+        cursor.single_mut().unwrap().translation = world_pos.extend(0.0);
     }
 }

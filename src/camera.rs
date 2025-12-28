@@ -1,8 +1,8 @@
 use crate::{
-    input::InputManager,
+    input::{InputMapping, InputState},
     modding::{
-        PostModLoad, PreModLoad,
-        registry::{Id, IdInterner},
+        PostModLoad,
+        registry::{Id, Registry},
     },
 };
 use bevy::prelude::*;
@@ -19,24 +19,26 @@ impl Plugin for CameraPlugin {
 
 #[derive(Debug, Resource)]
 struct CameraInputIds {
-    move_x: Id,
-    move_y: Id,
+    up: Id,
+    down: Id,
+    left: Id,
+    right: Id,
     speed: Id,
-    zoom: Id,
+    zoom_in: Id,
+    zoom_out: Id,
     pan: Id,
-    mouse_x: Id,
-    mouse_y: Id,
 }
 
-fn init_camera_input_ids(mut commands: Commands, mut interner: ResMut<IdInterner>) {
+fn init_camera_input_ids(mut commands: Commands, inputs: Res<Registry<InputMapping>>) {
     let ids = CameraInputIds {
-        move_x: interner.intern("base::input::x").unwrap(),
-        move_y: interner.intern("base::input::y").unwrap(),
-        speed: interner.intern("base::input::speed").unwrap(),
-        zoom: interner.intern("base::input::zoom").unwrap(),
-        pan: interner.intern("base::input::pan").unwrap(),
-        mouse_x: interner.intern("base::input::mouse_x").unwrap(),
-        mouse_y: interner.intern("base::input::mouse_y").unwrap(),
+        up: inputs.lookup("base::input::up").unwrap(),
+        down: inputs.lookup("base::input::down").unwrap(),
+        left: inputs.lookup("base::input::left").unwrap(),
+        right: inputs.lookup("base::input::right").unwrap(),
+        speed: inputs.lookup("base::input::speed").unwrap(),
+        zoom_in: inputs.lookup("base::input::zoom_in").unwrap(),
+        zoom_out: inputs.lookup("base::input::zoom_out").unwrap(),
+        pan: inputs.lookup("base::input::pan").unwrap(),
     };
     commands.insert_resource(ids);
 }
@@ -55,7 +57,7 @@ fn setup(mut commands: Commands) {
 
 fn camera_control(
     mut query: Query<(&Camera, &GlobalTransform, &mut Transform, &mut Projection)>,
-    input: Res<InputManager>,
+    input: Res<InputState>,
     ids: Res<CameraInputIds>,
     time: Res<Time>,
     mut last_pos: Local<Option<Vec2>>,
@@ -67,25 +69,25 @@ fn camera_control(
     };
 
     key_pan(&input, &ids, &mut transform, &ortho, &time);
-    cursor_zoom(&input, &ids, camera, global, &mut transform, ortho);
+    cursor_zoom(&input, &ids, ortho);
     drag_pan(&input, &ids, camera, global, &mut transform, &mut last_pos);
 }
 
 fn key_pan(
-    input: &InputManager,
+    input: &InputState,
     ids: &CameraInputIds,
     transform: &mut Transform,
     ortho: &OrthographicProjection,
     time: &Time,
 ) {
-    let dir = input.vec2_or_default(ids.move_x, ids.move_y);
+    let dir = input.vec2(ids.right, ids.left, ids.up, ids.down);
 
     if dir == Vec2::ZERO {
         return;
     }
 
     let mut speed = 128.0;
-    if input.bool_or_default(ids.speed) {
+    if input.pressed(ids.speed) {
         speed *= 4.0;
     }
 
@@ -93,50 +95,36 @@ fn key_pan(
         dir.normalize_or_zero().extend(0.0) * speed * ortho.scale * time.delta_secs();
 }
 
-fn cursor_zoom(
-    input: &InputManager,
-    ids: &CameraInputIds,
-    camera: &Camera,
-    global: &GlobalTransform,
-    transform: &mut Transform,
-    ortho: &mut OrthographicProjection,
-) {
-    let zoom = input.axis_or_default(ids.zoom);
-    if zoom == 0.0 {
-        return;
+fn cursor_zoom(input: &InputState, ids: &CameraInputIds, ortho: &mut OrthographicProjection) {
+    let mut zoom = input.scroll();
+    if input.just_pressed(ids.zoom_in) {
+        zoom += 1.0;
+    }
+    if input.just_pressed(ids.zoom_out) {
+        zoom -= 1.0;
     }
 
-    let cursor = input.vec2_or_default(ids.mouse_x, ids.mouse_y);
-
-    let Ok(world_before) = camera.viewport_to_world_2d(global, cursor) else {
-        return;
-    };
-
-    // exponential zoom (smooth + symmetric)
-    let zoom_factor = (1.0 - zoom * 0.15).clamp(0.1, 10.0);
-    ortho.scale *= zoom_factor;
-
-    let Ok(world_after) = camera.viewport_to_world_2d(global, cursor) else {
-        return;
-    };
-
-    transform.translation += (world_before - world_after).extend(0.0);
+    // Apply zoom (exponential)
+    let zoom_factor = 0.25;
+    ortho.scale *= 1.0 - zoom_factor * zoom;
 }
 
 fn drag_pan(
-    input: &InputManager,
+    input: &InputState,
     ids: &CameraInputIds,
     camera: &Camera,
     global: &GlobalTransform,
     transform: &mut Transform,
     last_pos: &mut Option<Vec2>,
 ) {
-    if !input.bool_or_default(ids.pan) {
+    if !input.pressed(ids.pan) {
         *last_pos = None;
         return;
     }
 
-    let cursor = input.vec2_or_default(ids.mouse_x, ids.mouse_y);
+    let Some(cursor) = input.mouse() else {
+        return;
+    };
 
     // If the cursor is zero things get weird
     if cursor.length_squared() == 0.0 {

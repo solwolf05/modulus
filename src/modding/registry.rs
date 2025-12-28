@@ -1,31 +1,52 @@
-use std::collections::{HashMap, hash_map};
+use std::{
+    collections::{HashMap, hash_map},
+    ops::Deref,
+};
 
 use bevy::ecs::resource::Resource;
 
 #[derive(Debug, Default, Resource)]
 pub struct Registry<T> {
     map: HashMap<Id, T>,
+    interner: IdInterner,
 }
 
 impl<T> Registry<T> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
+            interner: IdInterner::new(),
         }
     }
 
-    pub fn register(&mut self, interner: &mut IdInterner, path: &str, value: T) -> Option<Id> {
-        let id = interner.intern(path)?;
+    pub fn register(&mut self, path: &str, value: T) -> Option<Id> {
+        let id = self.interner.intern(path)?;
         self.map.insert(id, value);
         Some(id)
     }
 
-    pub fn get(&self, id: &Id) -> Option<&T> {
-        self.map.get(id)
+    pub fn lookup(&self, path: &str) -> Option<Id> {
+        self.interner.lookup(path)
     }
 
-    pub fn contains(&self, id: &Id) -> bool {
-        self.map.contains_key(id)
+    pub fn resolve(&self, id: Id) -> Option<&str> {
+        self.interner.resolve(id)
+    }
+
+    pub fn get(&self, id: Id) -> Option<&T> {
+        self.map.get(&id)
+    }
+
+    pub fn get_by_path(&self, path: &str) -> Option<&T> {
+        self.lookup(path).and_then(|id| self.get(id))
+    }
+
+    pub fn contains(&self, id: Id) -> bool {
+        self.resolve(id).is_some()
+    }
+
+    pub fn contains_path(&self, path: &str) -> bool {
+        self.lookup(path).is_some()
     }
 
     pub fn iter<'a>(&'a self) -> hash_map::Iter<'a, Id, T> {
@@ -40,13 +61,17 @@ impl<T> Registry<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(pub u32);
 
-#[derive(Default, Resource)]
+#[derive(Debug, Default, Resource)]
 pub struct IdInterner {
     strings: Vec<Box<str>>,
     lookup: HashMap<Box<str>, Id>,
 }
 
 impl IdInterner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn intern(&mut self, path: &str) -> Option<Id> {
         if let Some(&id) = self.lookup.get(path) {
             return Some(id);
@@ -65,8 +90,12 @@ impl IdInterner {
         Some(id)
     }
 
-    pub fn resolve(&self, id: Id) -> &str {
-        &self.strings[id.0 as usize]
+    pub fn lookup(&self, path: &str) -> Option<Id> {
+        self.lookup.get(path).copied()
+    }
+
+    pub fn resolve(&self, id: Id) -> Option<&str> {
+        self.strings.get(id.0 as usize).map(|v| v.deref())
     }
 
     fn is_valid_path(path: &str) -> bool {

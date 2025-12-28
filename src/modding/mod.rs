@@ -15,7 +15,6 @@ impl Plugin for ModPlugin {
         app.init_schedule(PreModLoad)
             .init_schedule(ModLoad)
             .init_schedule(PostModLoad)
-            .init_resource::<IdInterner>()
             .init_resource::<Mods>()
             .add_systems(PreModLoad, preload_mods)
             .add_systems(ModLoad, load_mods);
